@@ -3,22 +3,60 @@
 
 {% block content %}
 <div class="bg-white p-8 rounded-xl shadow-md w-full max-w-lg text-center space-y-6">
-  <h1 class="text-2xl font-bold">Welcome, {{ user }}</h1>
+  <h1 class="text-2xl font-bold" id="welcome">Welcome</h1>
 
-  <div>
-    <a
-      href="/api/user/{{ user }}"
-      target="_blank"
-      class="text-blue-600 underline"
-    >
-      Test protected API endpoint
-    </a>
-  </div>
+  <div id="userinfo" class="text-left"></div>
 
-  <form method="POST" action="/logout">
-    <button class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
-      Logout
-    </button>
-  </form>
+  <button id="logoutBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+    Logout
+  </button>
 </div>
+
+<script>
+const username = localStorage.getItem('username');
+const token = localStorage.getItem('token');
+const welcome = document.getElementById('welcome');
+const userinfo = document.getElementById('userinfo');
+const logoutBtn = document.getElementById('logoutBtn');
+
+if (!token) {
+  window.location.href = '/login';
+}
+
+welcome.textContent = `Welcome, ${username}`;
+
+async function loadUser() {
+  try {
+    const res = await fetch(`/api/user/${username}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      userinfo.innerHTML = `
+        <p><strong>ID:</strong> ${data.id}</p>
+        <p><strong>Username:</strong> ${data.username}</p>
+        <p><strong>Email:</strong> ${data.email}</p>
+      `;
+    } else {
+      userinfo.textContent = data.error || 'Error fetching data';
+      if (res.status === 401 || res.status === 403) {
+        // token expired or invalid
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
+    }
+  } catch (err) {
+    userinfo.textContent = 'Network error';
+  }
+}
+
+loadUser();
+
+logoutBtn.addEventListener('click', () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  window.location.href = '/login';
+});
+</script>
 {% endblock %}

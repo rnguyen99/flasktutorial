@@ -6,19 +6,23 @@ user service module. it has two endpoints:
 I have the user table store the user in the sqlite users.db 
 database with fields: id, username, password, email.
 '''
+
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, jsonify, g
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask import Flask, request, jsonify, g, redirect, url_for, render_template
 from flask_bcrypt import Bcrypt
+from flask_jwt_extended import (
+    JWTManager, create_access_token,
+    jwt_required, get_jwt_identity
+)
 
 DATABASE = "users.db"
 
 app = Flask(__name__)
-app.secret_key = "dev-secret-key-change-me"
+app.config["JWT_SECRET_KEY"] = "change-this-secret-in-prod"
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = 3600
 
 bcrypt = Bcrypt(app)
-login_manager = LoginManager(app)
-login_manager.login_view = "login_page"
+jwt = JWTManager(app)
 
 # ---------------------
 # Database helpers
@@ -35,7 +39,7 @@ def close_db(exception):
     if db is not None:
         db.close()
 
-def get_user_by_username(username):
+def get_user_by_username(username: str):
     db = get_db()
     return db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
@@ -44,69 +48,48 @@ def get_user_by_id(user_id):
     return db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 # ---------------------
-# Flask-Login user
-# ---------------------
-class User(UserMixin):
-    def __init__(self, id, username, email):
-        self.id = str(id)
-        self.username = username
-        self.email = email
-
-@login_manager.user_loader
-def load_user(user_id):
-    row = get_user_by_id(user_id)
-    if row:
-        return User(row["id"], row["username"], row["email"])
-    return None
-
-# ---------------------
 # Web pages
 # ---------------------
 @app.route("/")
 def home():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+    # JWT apps can't check auth here unless token is sent
     return redirect(url_for("login_page"))
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route("/login")
 def login_page():
-    error = None
-    if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
-
-        row = get_user_by_username(username)
-        if row and bcrypt.check_password_hash(row["password"], password):
-            user = User(row["id"], row["username"], row["email"])
-            login_user(user)
-            return redirect(url_for("dashboard"))
-        error = "Invalid username or password"
-
-    return render_template("login.html", error=error)
+    return render_template("login.html")
 
 @app.route("/dashboard")
-@login_required
 def dashboard():
-    return render_template("dashboard.html", user=current_user.username)
-
-@app.route("/logout", methods=["POST"])
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for("login_page"))
+    return render_template("dashboard.html")
 
 # ---------------------
 # API endpoints
 # ---------------------
-@app.route("/api/user/<username>")
-@login_required
-def get_user_api(username):
-    if current_user.username != username:
-        return jsonify({"error": "Forbidden"}), 403
+@app.route("/api/auth/login", methods=["POST"])
+def login_api():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
 
     row = get_user_by_username(username)
+    if not row or not bcrypt.check_password_hash(row["password"], password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    token = create_access_token(identity=str(row["id"]))
+    return jsonify(access_token=token), 200
+
+@app.route("/api/user/<username>")
+@jwt_required()
+def get_user_api(username):
+    user_id = get_jwt_identity()
+    row = get_user_by_id(int(user_id))
+
     if not row:
-        return jsonify({"error": "Not found"}), 404
+        return jsonify({"error": "User not found"}), 404
+
+    if row["username"] != username:
+        return jsonify({"error": "Forbidden"}), 403
 
     return jsonify({
         "id": row["id"],
