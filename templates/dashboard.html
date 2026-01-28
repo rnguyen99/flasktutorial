@@ -27,7 +27,7 @@ welcome.textContent = `Welcome, ${username}`;
 
 async function loadUser() {
   try {
-    const res = await fetch(`/api/user/${username}`, {
+    const res = await fetch(`${API_BASE_URL}/api/user/${username}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
